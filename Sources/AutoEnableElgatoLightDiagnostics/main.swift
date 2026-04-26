@@ -11,12 +11,14 @@ struct Diagnostics {
             await runCamera(seconds: 2)
         case "discover":
             await runDiscovery(seconds: 8)
+        case "scan":
+            await runScan()
         case "test-light":
             await testLight()
         case "watch":
             await runCamera(seconds: 20)
         default:
-            print("Usage: AutoEnableElgatoLightDiagnostics [camera|discover|watch|test-light <ip>]")
+            print("Usage: AutoEnableElgatoLightDiagnostics [camera|discover|scan|watch|test-light <ip>]")
         }
     }
 
@@ -49,6 +51,14 @@ struct Diagnostics {
         discovery.start()
         try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
         discovery.stop()
+    }
+
+    private static func runScan() async {
+        let lights = await LocalNetworkScanner().scan()
+        print("Scanned lights: \(lights.count)")
+        for light in lights {
+            print("- \(light.name) \(light.host):\(light.port) id=\(light.id)")
+        }
     }
 
     private static func testLight() async {

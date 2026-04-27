@@ -9,8 +9,8 @@ public final class LocalNetworkScanner: @unchecked Sendable {
 
     private let client: URLSession
     private let decoder = JSONDecoder()
-    private let timeout: TimeInterval
     private let maxConcurrentProbes: Int
+    private let candidateHostProvider: @Sendable () -> [String]
 
     public init(timeout: TimeInterval = 0.45, maxConcurrentProbes: Int = 32) {
         let configuration = URLSessionConfiguration.ephemeral
@@ -18,12 +18,22 @@ public final class LocalNetworkScanner: @unchecked Sendable {
         configuration.timeoutIntervalForResource = timeout
         configuration.waitsForConnectivity = false
         self.client = URLSession(configuration: configuration)
-        self.timeout = timeout
         self.maxConcurrentProbes = maxConcurrentProbes
+        self.candidateHostProvider = Self.interfaceCandidateHosts
+    }
+
+    init(
+        session: URLSession,
+        maxConcurrentProbes: Int = 32,
+        candidateHostProvider: @escaping @Sendable () -> [String]
+    ) {
+        self.client = session
+        self.maxConcurrentProbes = maxConcurrentProbes
+        self.candidateHostProvider = candidateHostProvider
     }
 
     public func scan() async -> [KeyLightEndpoint] {
-        let hosts = candidateHosts()
+        let hosts = candidateHostProvider()
         guard !hosts.isEmpty else { return [] }
 
         return await withTaskGroup(of: KeyLightEndpoint?.self) { group in
@@ -117,7 +127,7 @@ public final class LocalNetworkScanner: @unchecked Sendable {
             || product.contains("elgato")
     }
 
-    private func candidateHosts() -> [String] {
+    private static func interfaceCandidateHosts() -> [String] {
         var interfaces: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&interfaces) == 0, let first = interfaces else { return [] }
         defer { freeifaddrs(interfaces) }
@@ -134,7 +144,7 @@ public final class LocalNetworkScanner: @unchecked Sendable {
             guard interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) else { continue }
             guard let address = ipv4(interface.ifa_addr), let netmask = ipv4(interface.ifa_netmask) else { continue }
 
-            for host in hostsNear(address: address, netmask: netmask) {
+            for host in Self.hostsNear(address: address, netmask: netmask) {
                 hosts.insert(host)
             }
         }
@@ -142,7 +152,7 @@ public final class LocalNetworkScanner: @unchecked Sendable {
         return hosts.sorted()
     }
 
-    private func hostsNear(address: UInt32, netmask: UInt32) -> [String] {
+    private static func hostsNear(address: UInt32, netmask: UInt32) -> [String] {
         let network = address & netmask
         let broadcast = network | ~netmask
         let totalHosts = broadcast > network ? broadcast - network - 1 : 0
@@ -152,16 +162,16 @@ public final class LocalNetworkScanner: @unchecked Sendable {
         if totalHosts <= 254 {
             return ((network + 1)..<broadcast)
                 .filter { $0 != address }
-                .map(ipv4String)
+                .map(Self.ipv4String)
         }
 
         let prefix24 = address & 0xFF_FF_FF_00
         return ((prefix24 + 1)..<(prefix24 + 255))
             .filter { $0 != address }
-            .map(ipv4String)
+            .map(Self.ipv4String)
     }
 
-    private func ipv4(_ socketAddress: UnsafePointer<sockaddr>?) -> UInt32? {
+    private static func ipv4(_ socketAddress: UnsafePointer<sockaddr>?) -> UInt32? {
         guard let socketAddress else { return nil }
         let address = socketAddress.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
             $0.pointee.sin_addr.s_addr
@@ -169,7 +179,7 @@ public final class LocalNetworkScanner: @unchecked Sendable {
         return UInt32(bigEndian: address)
     }
 
-    private func ipv4String(_ address: UInt32) -> String {
+    private static func ipv4String(_ address: UInt32) -> String {
         [
             (address >> 24) & 0xFF,
             (address >> 16) & 0xFF,

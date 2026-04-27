@@ -93,9 +93,72 @@ import Testing
     }
 }
 
+@Test func scannerDiscoversLightFromAccessoryInfo() async throws {
+    MockURLProtocol.reset()
+    MockURLProtocol.register(
+        url: "http://192.0.2.10:9123/elgato/accessory-info",
+        statusCode: 200,
+        body: #"{"productName":"Elgato Key Light MK.2","displayName":"Desk Light","features":["lights"]}"#
+    )
+
+    let scanner = makeScanner(hosts: ["192.0.2.10"])
+    let lights = await scanner.scan()
+
+    #expect(lights == [
+        KeyLightEndpoint(id: "scan:192.0.2.10:9123", name: "Desk Light", host: "192.0.2.10")
+    ])
+}
+
+@Test func scannerFallsBackToLightsEndpoint() async throws {
+    MockURLProtocol.reset()
+    MockURLProtocol.register(
+        url: "http://192.0.2.11:9123/elgato/accessory-info",
+        statusCode: 404,
+        body: #"{}"#
+    )
+    MockURLProtocol.register(
+        url: "http://192.0.2.11:9123/elgato/lights",
+        statusCode: 200,
+        body: #"{"lights":[{"on":0,"brightness":40,"temperature":156}],"numberOfLights":1}"#
+    )
+
+    let scanner = makeScanner(hosts: ["192.0.2.11"])
+    let lights = await scanner.scan()
+
+    #expect(lights == [
+        KeyLightEndpoint(id: "scan:192.0.2.11:9123", name: "Elgato Key Light", host: "192.0.2.11")
+    ])
+}
+
+@Test func scannerIgnoresNonLightDevices() async throws {
+    MockURLProtocol.reset()
+    MockURLProtocol.register(
+        url: "http://192.0.2.12:9123/elgato/accessory-info",
+        statusCode: 200,
+        body: #"{"productName":"Elgato Stream Deck","features":["buttons"]}"#
+    )
+    MockURLProtocol.register(
+        url: "http://192.0.2.12:9123/elgato/lights",
+        statusCode: 404,
+        body: #"{}"#
+    )
+
+    let scanner = makeScanner(hosts: ["192.0.2.12"])
+    let lights = await scanner.scan()
+
+    #expect(lights.isEmpty)
+}
+
 private func testStore() -> SettingsStore {
     let suite = UserDefaults(suiteName: "AutoEnableElgatoLightTests.\(UUID().uuidString)")!
     return SettingsStore(defaults: suite)
+}
+
+private func makeScanner(hosts: [String]) -> LocalNetworkScanner {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockURLProtocol.self]
+    let session = URLSession(configuration: configuration)
+    return LocalNetworkScanner(session: session, maxConcurrentProbes: 4, candidateHostProvider: { hosts })
 }
 
 private struct Timeout: Error {}
@@ -180,4 +243,78 @@ private final class StatusRecorder: @unchecked Sendable {
     func record(_ status: AutomationStatus) {
         lock.withLock { statuses.append(status) }
     }
+}
+
+private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
+    private struct MockResponse: Sendable {
+        var statusCode: Int
+        var data: Data
+    }
+
+    private final class ResponseStore: @unchecked Sendable {
+        private let lock = NSLock()
+        private var responses: [String: MockResponse] = [:]
+
+        func reset() {
+            lock.withLock {
+                responses.removeAll()
+            }
+        }
+
+        func register(url: String, statusCode: Int, body: String) {
+            lock.withLock {
+                responses[url] = MockResponse(statusCode: statusCode, data: Data(body.utf8))
+            }
+        }
+
+        func response(for url: String) -> MockResponse? {
+            lock.withLock {
+                responses[url]
+            }
+        }
+    }
+
+    private static let store = ResponseStore()
+
+    static func reset() {
+        store.reset()
+    }
+
+    static func register(url: String, statusCode: Int, body: String) {
+        store.register(url: url, statusCode: statusCode, body: body)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+
+        let response = Self.store.response(for: url.absoluteString)
+
+        guard let response else {
+            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+            return
+        }
+
+        let httpResponse = HTTPURLResponse(
+            url: url,
+            statusCode: response.statusCode,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: response.data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }

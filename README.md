@@ -163,6 +163,11 @@ PUT http://<light-ip>:9123/elgato/lights
 - The fallback scanner is one-shot on launch/rescan; it is not a constant background poller.
 - Bonjour may be unreliable on some networks, especially with mDNS filtering, VLANs, VPNs, or router isolation.
 - Manual IP entry remains available as a last-resort fallback.
+- This is an unofficial project and is not affiliated with or endorsed by Elgato.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Project Layout
 

@@ -72,6 +72,8 @@ The DMG includes the app and an Applications symlink for drag-install testing.
 
 The app appears as a lightbulb in the macOS menu bar. It has no Dock icon.
 
+![Auto Enable Elgato Light menu bar screenshot](docs/images/menu-bar-screenshot.png)
+
 Menu items include:
 
 - Camera status

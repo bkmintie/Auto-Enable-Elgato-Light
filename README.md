@@ -74,17 +74,6 @@ The app appears as a lightbulb in the macOS menu bar. It has no Dock icon.
 
 ![Auto Enable Elgato Light menu bar screenshot](docs/images/menu-bar-screenshot.png)
 
-Menu items include:
-
-- Camera status
-- Camera device count
-- Light status
-- Set Light IP...
-- Clear Manual Lights
-- Rescan Lights
-- Launch at Login
-- Quit
-
 For a clean autodiscovery test:
 
 1. Quit any running copy of the app.
